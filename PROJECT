@@ -1,0 +1,16 @@
+domain: YOUR_DOMAIN
+layout:
+- go.kubebuilder.io/v4
+projectName: YOUR_PROJECT
+repo: github.com/YOUR_USERNAME/YOUR_PROJECT
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: YOUR_DOMAIN
+  group: YOUR_GROUP
+  kind: MyResource
+  path: github.com/YOUR_USERNAME/YOUR_PROJECT/api/v1
+  version: v1
+version: "3"

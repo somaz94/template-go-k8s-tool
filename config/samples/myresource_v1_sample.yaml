@@ -1,0 +1,8 @@
+apiVersion: YOUR_GROUP.YOUR_DOMAIN/v1
+kind: MyResource
+metadata:
+  name: myresource-sample
+  namespace: default
+spec:
+  replicas: 3
+  message: "Hello from MyResource!"

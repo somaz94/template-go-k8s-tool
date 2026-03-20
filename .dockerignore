@@ -1,0 +1,13 @@
+bin/
+.git/
+.github/
+docs/
+*.md
+LICENSE
+helm/
+config/
+hack/
+.vscode/
+test/
+cover.out
+*_test.go

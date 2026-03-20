@@ -1,0 +1,11 @@
+namespace: YOUR_PROJECT-system
+
+namePrefix: YOUR_PROJECT-
+
+resources:
+- ../crd
+- ../rbac
+- ../manager
+
+patches:
+- path: manager_metrics_patch.yaml
