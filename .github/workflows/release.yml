@@ -61,9 +61,3 @@ jobs:
           draft: false
           prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update major version tag
-        uses: somaz94/major-tag-action@v1
-        with:
-          tag: ${{ github.ref_name }}
-          github_token: ${{ secrets.PAT_TOKEN }}

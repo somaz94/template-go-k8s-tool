@@ -123,7 +123,7 @@ make test                 # Run unit tests
 │   └── create-pr.sh                     # Auto-generate PR body
 ├── .github/
 │   ├── workflows/
-│   │   ├── ci.yml                       # CI: test + manifests verify
+│   │   ├── test.yml                     # CI: test + manifests verify
 │   │   ├── release.yml                  # GitHub release on tag
 │   │   ├── changelog-generator.yml
 │   │   ├── contributors.yml
@@ -193,7 +193,7 @@ make pr title="..."    # Test → push → create PR
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| `ci.yml` | push (main), PR, dispatch | Unit tests → Manifests verify |
+| `test.yml` | push (main), PR, dispatch | Unit tests → Manifests verify |
 | `release.yml` | tag push `v*` | GitHub release |
 | `changelog-generator.yml` | after release, PR merge | Auto-generate CHANGELOG.md |
 | `contributors.yml` | after changelog | Auto-generate CONTRIBUTORS.md |

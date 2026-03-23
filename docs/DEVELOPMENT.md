@@ -71,7 +71,7 @@ make pr title="feat: add feature"   # Test → push → create PR
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| `ci.yml` | push (main), PR, dispatch | Unit tests → Manifests verify |
+| `test.yml` | push (main), PR, dispatch | Unit tests → Manifests verify |
 | `release.yml` | tag push `v*` | GitHub release |
 | `changelog-generator.yml` | after release, PR merge | Auto-generate CHANGELOG.md |
 | `contributors.yml` | after changelog | Auto-generate CONTRIBUTORS.md |

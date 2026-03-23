@@ -7,10 +7,6 @@ bin/
 *.test
 *.out
 
-# Coverage
-coverage.out
-coverage.html
-
 # Environment
 .env
 .env.*
