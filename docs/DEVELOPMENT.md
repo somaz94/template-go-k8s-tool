@@ -10,7 +10,8 @@ Guide for building, testing, and contributing to this Kubernetes controller.
 - Docker
 - kubectl
 - Make
-- Access to a Kubernetes cluster (for e2e testing)
+- Kind (for e2e testing)
+- Helm (for chart testing)
 
 <br/>
 
@@ -40,8 +41,9 @@ Always run these after modifying `api/v1/types.go` or RBAC markers.
 
 ```bash
 make test            # Run unit tests with envtest
-make cover           # Generate coverage report
-make cover-html      # Open coverage in browser
+make test-e2e        # Run e2e tests (requires Kind cluster)
+make test-helm       # Run Helm chart tests
+make lint            # Run golangci-lint
 ```
 
 <br/>
@@ -53,6 +55,15 @@ make install         # Install CRDs into cluster
 make deploy          # Deploy controller to cluster
 make undeploy        # Remove controller from cluster
 make uninstall       # Remove CRDs from cluster
+```
+
+<br/>
+
+## Version Management
+
+```bash
+make version                           # Show current version
+make bump-version VERSION_BUMP=v0.2.0  # Bump across all files
 ```
 
 <br/>
@@ -71,18 +82,23 @@ make pr title="feat: add feature"   # Test → push → create PR
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| `test.yml` | push (main), PR, dispatch | Unit tests → Manifests verify |
-| `release.yml` | tag push `v*` | GitHub release |
+| `test.yml` | push, PR, dispatch | Unit tests → Manifests verify |
+| `test-e2e.yml` | push, PR, dispatch | E2E tests with Kind cluster |
+| `lint.yml` | dispatch | golangci-lint |
+| `release.yml` | tag push `v*` | GitHub release (git-cliff) + major tag |
+| `helm-release.yml` | tag push `v*` | Helm chart release to gh-pages |
 | `changelog-generator.yml` | after release, PR merge | Auto-generate CHANGELOG.md |
 | `contributors.yml` | after changelog | Auto-generate CONTRIBUTORS.md |
 | `stale-issues.yml` | daily cron | Auto-close stale issues |
 | `dependabot-auto-merge.yml` | PR (dependabot) | Auto-merge minor/patch updates |
 | `issue-greeting.yml` | issue opened | Welcome message |
+| `gitlab-mirror.yml` | push to main | Mirror to GitLab |
 
 ### Workflow Chain
 
 ```
-tag push v* → Create release
+tag push v* → Create release (git-cliff) + update major tag (v1)
+            → Helm chart release (gh-pages)
                 └→ Generate changelog
                       └→ Generate Contributors
 ```
@@ -92,13 +108,19 @@ tag push v* → Create release
 ## Release
 
 ```bash
-# Update image tag in Makefile
-# Build and push Docker image
+# 1. Bump version across all files
+make bump-version VERSION_BUMP=v0.2.0
+
+# 2. Commit and push
+git commit -am "chore: bump version to v0.2.0"
+git push origin main
+
+# 3. Build and push Docker image
 make docker-buildx
 
-# Tag and push
-git tag v0.1.0
-git push origin v0.1.0
+# 4. Tag and push (triggers release + helm-release workflows)
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 <br/>
@@ -107,4 +129,7 @@ git push origin v0.1.0
 
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`, `chore:`)
 - **CRD changes**: Always run `make manifests generate` after modifying types.go
+- **Helm CRDs**: Keep `helm/YOUR_PROJECT/crds/` in sync with `config/crd/bases/`
 - **paths-ignore**: CI skips `.github/workflows/**` and `**/*.md` changes
+- **Docker**: Multi-arch builds with distroless nonroot base
+- **Linting**: golangci-lint with project `.golangci.yml` config

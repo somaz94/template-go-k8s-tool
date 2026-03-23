@@ -1,113 +1,161 @@
-.PHONY: help manifests generate fmt vet test build docker-build docker-push docker-buildx deploy undeploy install uninstall clean check-gh branch pr
-
+# Image URL to use all building/pushing image targets
 IMG ?= YOUR_DOCKER_REGISTRY/YOUR_PROJECT:latest
-PLATFORMS ?= linux/arm64,linux/amd64
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
-BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
 
-## Location of tool binaries
-LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
-	mkdir -p $(LOCALBIN)
+# Pin Go toolchain to the version specified in go.mod to avoid covdata errors
+# from automatic toolchain switching
+GO_MOD_VERSION := $(shell grep '^go ' go.mod | awk '{print $$2}')
+export GOTOOLCHAIN := go$(GO_MOD_VERSION)
 
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-ENVTEST ?= $(LOCALBIN)/setup-envtest
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
 
-KUSTOMIZE_VERSION ?= v5.5.0
-CONTROLLER_TOOLS_VERSION ?= v0.16.4
-ENVTEST_VERSION ?= release-0.19
+# CONTAINER_TOOL defines the container tool to be used for building images.
+CONTAINER_TOOL ?= docker
 
-## Build
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
 
-build: manifests generate fmt vet ## Build manager binary
-	go build -ldflags="-s -w -X main.version=$(VERSION) -X main.gitCommit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)" \
-		-o bin/manager ./cmd/main.go
+.PHONY: all
+all: build
 
-run: manifests generate fmt vet ## Run controller from host
-	go run ./cmd/main.go
+##@ General
 
-## Generate
+.PHONY: help
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-manifests: controller-gen ## Generate CRD manifests, RBAC, etc.
+##@ Development
+
+.PHONY: manifests
+manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
-generate: controller-gen ## Generate code (DeepCopy, etc.)
+.PHONY: generate
+generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
-## Quality
-
-fmt: ## Format code
+.PHONY: fmt
+fmt: ## Run go fmt against code.
 	go fmt ./...
 
-vet: ## Run go vet
+.PHONY: vet
+vet: ## Run go vet against code.
 	go vet ./...
 
-## Test
+.PHONY: test
+test: manifests generate fmt vet envtest ## Run tests.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-test: manifests generate fmt vet envtest ## Run unit tests
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
-		go test ./... -v -race -cover -coverprofile=coverage.out
+.PHONY: test-e2e
+test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
+	@command -v kind >/dev/null 2>&1 || { \
+		echo "Kind is not installed. Please install Kind manually."; \
+		exit 1; \
+	}
+	@kind get clusters | grep -q 'kind' || { \
+		echo "No Kind cluster is running. Please start a Kind cluster before running the e2e tests."; \
+		exit 1; \
+	}
+	go test ./test/e2e/ -v -ginkgo.v
 
-cover: test ## Generate coverage report
-	go tool cover -func=coverage.out
+.PHONY: test-helm
+test-helm: ## Run Helm chart tests (lint, install, sync tests, uninstall).
+	@bash hack/test-helm.sh
 
-cover-html: test ## Open coverage in browser
-	go tool cover -html=coverage.out -o coverage.html
-	open coverage.html
+.PHONY: lint
+lint: golangci-lint ## Run golangci-lint linter
+	$(GOLANGCI_LINT) run
 
-## Docker
+.PHONY: lint-fix
+lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
+	$(GOLANGCI_LINT) run --fix
 
-docker-build: ## Build Docker image
-	docker build \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
-		--build-arg BUILD_DATE=$(BUILD_DATE) \
-		-t $(IMG) .
+##@ Build
 
-docker-push: ## Push Docker image
-	docker push $(IMG)
+.PHONY: build
+build: manifests generate fmt vet ## Build manager binary.
+	go build -o bin/manager cmd/main.go
 
-docker-buildx: ## Build and push multi-arch Docker image
-	- docker buildx create --name project-builder
-	docker buildx use project-builder
-	- docker buildx build --push --platform=$(PLATFORMS) \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
-		--build-arg BUILD_DATE=$(BUILD_DATE) \
-		--tag $(IMG) .
-	- docker buildx rm project-builder
+.PHONY: run
+run: manifests generate fmt vet ## Run a controller from your host.
+	go run ./cmd/main.go
 
-## Deploy
+DOCKER_BUILD_ARGS = \
+	--build-arg VERSION=$(shell echo ${IMG} | cut -d: -f2) \
+	--build-arg GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+	--build-arg BUILD_DATE=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-install: manifests kustomize ## Install CRDs into cluster
-	$(KUSTOMIZE) build config/crd | kubectl apply -f -
+.PHONY: docker-build
+docker-build: ## Build docker image with the manager.
+	$(CONTAINER_TOOL) build $(DOCKER_BUILD_ARGS) -t ${IMG} .
 
-uninstall: manifests kustomize ## Uninstall CRDs from cluster
-	$(KUSTOMIZE) build config/crd | kubectl delete --ignore-not-found -f -
+.PHONY: docker-push
+docker-push: ## Push docker image with the manager.
+	$(CONTAINER_TOOL) push ${IMG}
 
-deploy: manifests kustomize ## Deploy controller to cluster
-	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
-	$(KUSTOMIZE) build config/default | kubectl apply -f -
+PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+.PHONY: docker-buildx-tag
+docker-buildx-tag: ## Build and push docker image for cross-platform support with specific version
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	- $(CONTAINER_TOOL) buildx create --name project-builder
+	$(CONTAINER_TOOL) buildx use project-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) \
+		$(DOCKER_BUILD_ARGS) \
+		--tag ${IMG} \
+		-f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx rm project-builder
+	rm Dockerfile.cross
 
-undeploy: kustomize ## Undeploy controller from cluster
-	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found -f -
+.PHONY: docker-buildx-latest
+docker-buildx-latest: ## Build and push docker image for cross-platform support with latest tag
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	- $(CONTAINER_TOOL) buildx create --name project-builder
+	$(CONTAINER_TOOL) buildx use project-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) \
+		$(DOCKER_BUILD_ARGS) \
+		--tag $(shell echo ${IMG} | cut -f1 -d:):latest \
+		-f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx rm project-builder
+	rm Dockerfile.cross
 
-## Cleanup
+.PHONY: docker-buildx
+docker-buildx: ## Build and push both version-specific and latest tags
+docker-buildx: docker-buildx-tag docker-buildx-latest
 
-clean: ## Remove build artifacts
-	rm -rf bin/ coverage.out coverage.html
+.PHONY: build-installer
+build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
+	mkdir -p dist
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default > dist/install.yaml
 
-## Workflow
+##@ Version
 
+.PHONY: version
+version: ## Show current version across all files.
+	@./hack/bump-version.sh --current
+
+VERSION_BUMP ?=
+.PHONY: bump-version
+bump-version: ## Bump version across all files. Usage: make bump-version VERSION_BUMP=v0.2.0
+	@if [ -z "$(VERSION_BUMP)" ]; then echo "Usage: make bump-version VERSION_BUMP=vX.Y.Z"; exit 1; fi
+	@./hack/bump-version.sh $(VERSION_BUMP)
+
+##@ Workflow
+
+.PHONY: check-gh
 check-gh: ## Check if gh CLI is installed and authenticated
 	@command -v gh >/dev/null 2>&1 || { echo "\033[31m✗ gh CLI not installed. Run: brew install gh\033[0m"; exit 1; }
 	@gh auth status >/dev/null 2>&1 || { echo "\033[31m✗ gh CLI not authenticated. Run: gh auth login\033[0m"; exit 1; }
 	@echo "\033[32m✓ gh CLI ready\033[0m"
 
+.PHONY: branch
 branch: ## Create feature branch (usage: make branch name=feature-name)
 	@if [ -z "$(name)" ]; then echo "Usage: make branch name=<feature-name>"; exit 1; fi
 	git checkout main
@@ -115,6 +163,7 @@ branch: ## Create feature branch (usage: make branch name=feature-name)
 	git checkout -b feat/$(name)
 	@echo "\033[32m✓ Branch feat/$(name) created\033[0m"
 
+.PHONY: pr
 pr: check-gh ## Run tests, push, and create PR (usage: make pr title="Add feature")
 	@if [ -z "$(title)" ]; then echo "Usage: make pr title=\"PR title\""; exit 1; fi
 	go test ./... -race -cover
@@ -123,38 +172,84 @@ pr: check-gh ## Run tests, push, and create PR (usage: make pr title="Add featur
 	@./scripts/create-pr.sh "$(title)"
 	@echo "\033[32m✓ PR created\033[0m"
 
-## Tool dependencies
+##@ Deployment
 
-.PHONY: kustomize controller-gen envtest
+ifndef ignore-not-found
+  ignore-not-found = false
+endif
 
-kustomize: $(KUSTOMIZE)
+.PHONY: install
+install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
+
+.PHONY: uninstall
+uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: deploy
+deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+
+.PHONY: undeploy
+undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+##@ Dependencies
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+## Tool Binaries
+KUBECTL ?= kubectl
+KUSTOMIZE ?= $(LOCALBIN)/kustomize
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+
+## Tool Versions
+KUSTOMIZE_VERSION ?= v5.5.0
+CONTROLLER_TOOLS_VERSION ?= v0.16.4
+ENVTEST_VERSION ?= release-0.19
+GOLANGCI_LINT_VERSION ?= v2.1.6
+
+.PHONY: kustomize
+kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
-controller-gen: $(CONTROLLER_GEN)
+.PHONY: controller-gen
+controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
-envtest: $(ENVTEST)
+.PHONY: envtest
+envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+$(GOLANGCI_LINT): $(LOCALBIN)
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+.PHONY: install-tools
+install-tools: kustomize controller-gen envtest golangci-lint ## Install all required tools
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
 define go-install-tool
 @[ -f "$(1)-$(3)" ] || { \
 set -e; \
-TMP_DIR=$$(mktemp -d); \
-cd $$TMP_DIR; \
-go mod init tmp; \
-echo "Downloading $(2)@$(3)"; \
-GOBIN=$(LOCALBIN) go install $(2)@$(3); \
-rm -rf $$TMP_DIR; \
-}
-@ln -sf $$(basename $(1)) $(1)-$(3)
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(1)-$(3) $(1)
 endef
-
-## Help
-
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
-.DEFAULT_GOAL := help

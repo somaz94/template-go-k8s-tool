@@ -20,12 +20,12 @@ updates:
           - minor
           - patch
 
-  - package-ecosystem: gomod
-    directory: /
+  - package-ecosystem: "gomod"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
     groups:
-      go-mod-minor:
+      go-minor:
         update-types:
           - minor
           - patch

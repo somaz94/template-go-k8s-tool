@@ -1,6 +1,6 @@
 # template-go-k8s-tool
 
-A GitHub template repository for building Kubernetes controllers with [Kubebuilder](https://kubebuilder.io/) (controller-runtime), Docker, and automated CI/CD workflows.
+A GitHub template repository for building Kubernetes controllers with [Kubebuilder](https://kubebuilder.io/) (controller-runtime), Helm charts, Docker, and automated CI/CD workflows.
 
 <br/>
 
@@ -11,10 +11,11 @@ A GitHub template repository for building Kubernetes controllers with [Kubebuild
 | **Controller** | `cmd/`, `api/v1/`, `internal/controller/` | Controller-runtime manager with example CRD and reconciler |
 | **CRD** | `config/crd/` | Example CustomResourceDefinition with spec/status |
 | **K8s Config** | `config/` | Kustomize overlays (default, manager, rbac, samples) |
+| **Helm** | `helm/` | Helm chart with values, templates, CRDs |
 | **Docker** | `Dockerfile`, `.dockerignore` | Multi-stage build (golang → distroless:nonroot) |
-| **Build** | `Makefile` | build, test, manifests, generate, deploy, docker, pr |
-| **CI/CD** | `.github/workflows/` | Test, release, changelog, contributors, dependabot |
-| **Scripts** | `scripts/` | PR auto-generator (`create-pr.sh`) |
+| **Build** | `Makefile` | build, test, lint, manifests, generate, deploy, docker, pr |
+| **CI/CD** | `.github/workflows/` | Test, e2e, lint, release, helm-release, changelog, contributors |
+| **Scripts** | `scripts/`, `hack/` | PR auto-generator, version bump, helm tests |
 | **Docs** | `CLAUDE.md`, `docs/` | Project guidelines and development guide |
 
 <br/>
@@ -64,6 +65,9 @@ find . -type f -not -path './.git/*' -exec sed -i '' \
 # Rename CRD file
 mv config/crd/bases/YOUR_GROUP.YOUR_DOMAIN_myresources.yaml \
    config/crd/bases/apps.example.dev_appconfigs.yaml
+
+# Rename helm chart directory
+mv helm/YOUR_PROJECT helm/my-controller
 ```
 
 <br/>
@@ -117,14 +121,25 @@ make test                 # Run unit tests
 │   │   └── service_account.yaml
 │   └── samples/
 │       └── myresource_v1_sample.yaml    # Example CR
+├── helm/
+│   └── YOUR_PROJECT/
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       ├── .helmignore
+│       ├── crds/
+│       └── templates/
 ├── hack/
-│   └── boilerplate.go.txt               # License header for generated code
+│   ├── boilerplate.go.txt               # License header for generated code
+│   └── bump-version.sh                  # Version bump across all files
 ├── scripts/
 │   └── create-pr.sh                     # Auto-generate PR body
 ├── .github/
 │   ├── workflows/
 │   │   ├── test.yml                     # CI: test + manifests verify
-│   │   ├── release.yml                  # GitHub release on tag
+│   │   ├── test-e2e.yml                 # E2E tests with Kind cluster
+│   │   ├── lint.yml                     # golangci-lint
+│   │   ├── release.yml                  # GitHub release (git-cliff) + major tag
+│   │   ├── helm-release.yml             # Helm chart release to gh-pages
 │   │   ├── changelog-generator.yml
 │   │   ├── contributors.yml
 │   │   ├── dependabot-auto-merge.yml
@@ -136,6 +151,8 @@ make test                 # Run unit tests
 ├── .dockerignore
 ├── .gitattributes
 ├── .gitignore
+├── .golangci.yml
+├── cliff.toml
 ├── Dockerfile                           # Multi-stage (golang → distroless)
 ├── Makefile
 ├── CLAUDE.md
@@ -155,12 +172,14 @@ make test                 # Run unit tests
 |---|---|---|
 | Framework | Cobra CLI | controller-runtime (Kubebuilder) |
 | Entry point | CLI commands | Controller manager + reconciler |
-| Distribution | GoReleaser + Homebrew | Docker image + Kustomize deploy |
+| Distribution | GoReleaser + Homebrew | Docker image + Kustomize + Helm |
 | Config | CLI flags + YAML file | CRD + Kustomize overlays |
 | Docker base | None | `distroless:nonroot` |
-| Testing | `go test` | envtest (fake K8s API server) |
-| Makefile | build, test, pr | + manifests, generate, deploy, undeploy, install |
+| Testing | `go test` | envtest + e2e (Kind) |
+| Linting | None | golangci-lint |
+| Makefile | build, test, pr | + manifests, generate, deploy, lint, version |
 | Code gen | None | controller-gen (CRD, RBAC, DeepCopy) |
+| Release notes | GoReleaser | git-cliff |
 
 <br/>
 
@@ -170,7 +189,9 @@ make test                 # Run unit tests
 make help              # Show all targets
 make build             # Build binary → ./bin/manager
 make test              # Run unit tests with envtest
-make cover             # Generate coverage report
+make test-e2e          # Run e2e tests (requires Kind)
+make test-helm         # Run Helm chart tests
+make lint              # Run golangci-lint
 make manifests         # Generate CRD YAML, RBAC roles
 make generate          # Generate DeepCopy methods
 make fmt               # Format code
@@ -182,9 +203,12 @@ make install           # Install CRDs into cluster
 make uninstall         # Remove CRDs from cluster
 make deploy            # Deploy controller to cluster
 make undeploy          # Remove controller from cluster
-make clean             # Remove build artifacts
+make version           # Show current version
+make bump-version VERSION_BUMP=vX.Y.Z  # Bump version
 make branch name=x     # Create feature branch feat/x
 make pr title="..."    # Test → push → create PR
+make clean             # Remove build artifacts
+make install-tools     # Install all required tools
 ```
 
 <br/>
@@ -193,8 +217,11 @@ make pr title="..."    # Test → push → create PR
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| `test.yml` | push (main), PR, dispatch | Unit tests → Manifests verify |
-| `release.yml` | tag push `v*` | GitHub release |
+| `test.yml` | push, PR, dispatch | Unit tests → Manifests verify |
+| `test-e2e.yml` | push, PR, dispatch | E2E tests with Kind cluster |
+| `lint.yml` | dispatch | golangci-lint |
+| `release.yml` | tag push `v*` | GitHub release (git-cliff) + major tag update |
+| `helm-release.yml` | tag push `v*` | Helm chart release to gh-pages |
 | `changelog-generator.yml` | after release, PR merge | Auto-generate CHANGELOG.md |
 | `contributors.yml` | after changelog | Auto-generate CONTRIBUTORS.md |
 | `dependabot-auto-merge.yml` | dependabot PR | Auto-merge minor/patch updates |
@@ -204,11 +231,22 @@ make pr title="..."    # Test → push → create PR
 
 <br/>
 
+### Workflow Chain
+
+```
+tag push v* → Create release (git-cliff) + update major tag (v1)
+            → Helm chart release (gh-pages)
+                └→ Generate changelog
+                      └→ Generate Contributors
+```
+
+<br/>
+
 ## GitHub Secrets Required
 
 | Secret | Usage |
 |--------|-------|
-| `PAT_TOKEN` | Release, contributors (cross-repo access) |
+| `PAT_TOKEN` | Release, helm release, contributors (cross-repo access) |
 | `GITLAB_TOKEN` | GitLab mirror (optional) |
 
 <br/>

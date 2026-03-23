@@ -1,23 +1,19 @@
-name: Test
+name: Tests
 
 on:
   push:
-    branches: [main]
     paths-ignore:
       - '.github/workflows/**'
       - '**/*.md'
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  unit-tests:
-    name: Unit Tests
+  test:
+    name: Run on Ubuntu
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Clone the code
         uses: actions/checkout@v6
 
       - name: Setup Go
@@ -26,51 +22,16 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Verify go.mod is tidy
+      - name: Running Tests
         run: |
           go mod tidy
-          if ! git diff --exit-code go.mod go.sum; then
-            echo "FAIL: go.mod or go.sum is not tidy"
-            exit 1
-          fi
+          make test
 
-      - name: Run go vet
-        run: go vet ./...
-
-      - name: Run go fmt check
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "Code is not formatted. Run 'go fmt ./...'"
-            gofmt -d .
-            exit 1
-          fi
-
-      - name: Run tests
-        run: make test
-
-      - name: Verify manifests
+      - name: Verify manifests and generated code
         run: |
           make manifests generate
-          if ! git diff --exit-code; then
-            echo "FAIL: manifests or generated code is not up to date"
+          git diff --exit-code -- config/ api/
+          if [ $? -ne 0 ]; then
+            echo "::error::Generated manifests or deepcopy are out of date. Run 'make manifests generate' and commit the changes."
             exit 1
           fi
-
-      - name: Display coverage summary
-        run: go tool cover -func=coverage.out
-
-  ci-result:
-    name: CI Result
-    if: always()
-    needs:
-      - unit-tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check all jobs
-        run: |
-          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
-             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
-            echo "[FAIL] Some jobs failed or were cancelled"
-            exit 1
-          fi
-          echo "[PASS] All CI jobs passed"

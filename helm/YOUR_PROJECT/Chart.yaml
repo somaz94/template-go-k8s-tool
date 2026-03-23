@@ -1,0 +1,25 @@
+apiVersion: v2
+name: YOUR_PROJECT
+description: A Helm chart for YOUR_PROJECT controller
+type: application
+version: 0.1.0
+appVersion: "v0.1.0"
+
+# Dependencies and requirements
+kubeVersion: ">=1.16.0-0"
+
+# Keywords and categories for documentation
+keywords:
+  - kubernetes
+  - controller
+  - operator
+
+# Home page, sources, and documentation
+home: https://github.com/YOUR_USERNAME/YOUR_PROJECT
+sources:
+  - https://github.com/YOUR_USERNAME/YOUR_PROJECT
+
+# Maintainer information
+maintainers:
+  - name: YOUR_USERNAME
+    url: https://github.com/YOUR_USERNAME
