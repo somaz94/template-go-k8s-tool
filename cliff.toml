@@ -42,5 +42,5 @@ commit_parsers = [
 ]
 
 [remote.github]
-owner = "YOUR_USERNAME"
-repo = "YOUR_PROJECT"
+owner = "somaz94"
+repo = "template-go-k8s-tool"
