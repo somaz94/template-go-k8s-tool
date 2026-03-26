@@ -20,11 +20,6 @@ make version         # Show current version
 make bump-version VERSION_BUMP=vX.Y.Z  # Bump version across all files
 ```
 
-- Do not include `Co-Authored-By` lines in commit messages.
-- Use Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`, `chore:`)
-- Do not push to remote. Only commit. The user will push manually.
-- Do not modify git config.
-
 ## Project Structure
 
 ```
@@ -72,6 +67,3 @@ git push origin main
 make docker-buildx               # Build and push multi-arch image
 git tag vX.Y.Z && git push origin vX.Y.Z  # Triggers release + helm-release workflows
 ```
-
-- Communicate with the user in Korean.
-- All documentation and code comments must be written in English.
