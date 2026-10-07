@@ -12,7 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Project name (auto-detected from Makefile IMG)
+# Must match the image name in Makefile IMG and the chart dir under helm/.
 PROJECT_NAME="YOUR_PROJECT"
 
 # Extract current version from Makefile
